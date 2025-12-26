@@ -21,7 +21,7 @@ struct BPlusTree< K: Ord + Copy, V> {
 }
 
 // Impl Leaf
-impl< K: Ord + Copy, V> LeafNode<K, V> {
+impl<K: Ord + Copy, V> LeafNode<K, V> {
 
     fn new(next: Option<usize>) -> Self {
 
@@ -48,10 +48,38 @@ impl< K: Ord + Copy, V> LeafNode<K, V> {
 
 }
 
+// Impl Internal
+impl<K: Ord + Copy> InternalNode<K> {
+
+
+    // Find the index of the next child for a key using binary search over the current node
+    //
+    // IMPORTANT: 
+    // Assuming the tree follow the LOWER left and GREATER OR EQUAL right convention.
+    fn find_child_index(&self, key: K) -> usize {
+
+        let pre_index = self.keys.binary_search(&key);
+
+        // This match uses the singular implementation of the binary_search
+        // method to figure where the child node is
+        let index = match pre_index {
+            Ok(index_minus_one) => {
+                index_minus_one + 1
+            },
+            Err(right_index) => {
+                right_index
+            }
+        };
+
+        self.children[index]
+    }
+
+}
+
 
 
 // Impl Node 
-impl< K: Ord + Copy, V> Node<K, V> {
+impl<K: Ord + Copy, V> Node<K, V> {
 
 
 }
@@ -66,6 +94,22 @@ impl< K: Ord + Copy, V> BPlusTree<K, V> {
         }
     }
 
+    // How many nodes does the tree have
+    #[inline]
+    fn size(&self) -> usize {
+        self.nodes.len()
+    }
+
+    // Gets a reference to the root node (or None)
+    fn root(&self) -> Option<&Node<K, V>> {
+        if let Some(idx) = self.root_idx {
+            Some(&self.nodes[idx])
+        } else {
+            None
+        }
+
+    }
+
     // Done (Can, and will, be improved)
     fn create_first_root(&mut self, key: K, value: V) {
         self.nodes.push(Node::Leaf(LeafNode::new(None)));
@@ -78,12 +122,32 @@ impl< K: Ord + Copy, V> BPlusTree<K, V> {
         }
     }
 
-    // How many nodes does the tree have
-    // NOTE: tem que ver como faz pra ficar inline isso aqui
-    // note2: descobri como faz, agora tem que gerar o assembly pra ver se funciona
-    #[inline]
-    fn size(&self) -> usize {
-        self.nodes.len()
+
+    // Returns a reference to the value corresponding to the key.
+    // May be None if the key cannot be find.
+    fn get(&self, key: K) -> Option<&V> {
+
+        let mut curr_node;
+
+        // Get the root or return None, alright
+        if let Some(root) = self.root() {
+            curr_node = root;
+        } else {
+            return None;
+        }
+
+        // Go to the corresponding leaf
+        while let Node::Internal(int_node) = curr_node {
+            curr_node = &self.nodes[int_node.find_child_index(key)];
+        }
+
+        if let Node::Leaf(leaf_node) = curr_node {
+            leaf_node.retrieve_value(key)
+        } else {
+            None
+        }
+
+
     }
 
     fn insert(&mut self, key: K, value: V) {
@@ -94,6 +158,11 @@ impl< K: Ord + Copy, V> BPlusTree<K, V> {
             self.create_first_root(key, value);
             return;
         }
+
+
+        // NOTE: ANTES DA FUNCAO de remove funcionar eu vou simplesmente usar
+        // push no vetor de nodos em caso de split, DEPOIS eu vou fazer pra usar o primeiro num banco
+        // de posicoes removidas ou nao utilizadas
 
         todo!()
 
