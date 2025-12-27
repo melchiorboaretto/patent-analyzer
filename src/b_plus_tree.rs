@@ -15,7 +15,7 @@ enum Node<K, V, const M: usize> {
 }
 
 struct BPlusTree< K: Ord + Copy, V, const M: usize> {
-    root_idx: Option<usize>,
+    root_idx: usize,
     nodes: Vec<Node<K, V, M>>,
 }
 
@@ -25,7 +25,7 @@ impl<K: Ord + Copy, V, const M: usize> LeafNode<K, V, M> {
     fn new(next: Option<usize>) -> Self {
 
         LeafNode {
-            content: Vec::new(),
+            content: Vec::with_capacity(M),
             next,
         }
 
@@ -43,6 +43,18 @@ impl<K: Ord + Copy, V, const M: usize> LeafNode<K, V, M> {
         }
     }
 
+    fn update_value(&mut self, key: K, value: V) -> Option<V> {
+
+        if let Ok(index) = self
+            .content.binary_search_by_key(&key, |pair| pair.0) {
+
+            Some(std::mem::replace(&mut self.content[index].1, value))
+
+        } else {
+            None
+        }
+    }
+
 
 
 }
@@ -50,6 +62,14 @@ impl<K: Ord + Copy, V, const M: usize> LeafNode<K, V, M> {
 // Impl Internal
 impl<K: Ord + Copy, const M: usize> InternalNode<K, M> {
 
+    fn new() -> Self {
+
+        InternalNode {
+            keys: Vec::with_capacity(M),
+            children: Vec::with_capacity(M), // This is a vector of indexes, these index a vector with all the nodes
+        }
+
+    }
 
     // Find the index of the next child for a key using binary search over the current node
     //
@@ -79,16 +99,23 @@ impl<K: Ord + Copy, const M: usize> InternalNode<K, M> {
 
 // Impl Node 
 impl<K: Ord + Copy, V, const M: usize> Node<K, V, M> {
+    fn new_leaf() -> Self {
+        Node::Leaf(LeafNode::new(None))
+    }
 
+    fn new_internal() -> Self {
+        Node::Internal(InternalNode::new())
+    }
 
 }
 
 impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
 
     fn new() -> Self {
+
         BPlusTree {
-            root_idx: None,
-            nodes: Vec::new(),
+            root_idx: 0,
+            nodes: vec![Node::new_leaf()],
         }
     }
 
@@ -107,27 +134,9 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
     }
 
     // Gets a reference to the root node (or None)
-    fn root(&self) -> Option<&Node<K, V, M>> {
-        if let Some(idx) = self.root_idx {
-            Some(&self.nodes[idx])
-        } else {
-            None
-        }
-
+    fn root(&self) -> &Node<K, V, M> {
+        &self.nodes[self.root_idx]
     }
-
-    // Done (Can, and will, be improved)
-    fn create_first_root(&mut self, key: K, value: V) {
-        self.nodes.push(Node::Leaf(LeafNode::new(None)));
-
-        let root_idx = 0;
-        self.root_idx = Some(root_idx);
-
-        if let Node::Leaf(new_leaf) = &mut self.nodes[root_idx] {
-            new_leaf.content.push((key, value));
-        }
-    }
-
 
     // Returns a reference to the value corresponding to the key.
     // May be None if the key cannot be find.
@@ -136,11 +145,7 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
         let mut curr_node;
 
         // Get the root or return None, alright
-        if let Some(root) = self.root() {
-            curr_node = root;
-        } else {
-            return None;
-        }
+        curr_node = self.root();
 
         // Go to the corresponding leaf
         while let Node::Internal(int_node) = curr_node {
@@ -158,13 +163,7 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
 
     fn insert(&mut self, key: K, value: V) {
 
-        // Considering the empty tree case. Putting the CPU's branch predictor to test
-        // on every insertion hehe
-        if self.root_idx.is_none() {
-            self.create_first_root(key, value);
-            return;
-        }
-
+        // I've decided there will be no empty tree
 
         // NOTE: ANTES DA FUNCAO de remove funcionar eu vou simplesmente usar
         // push no vetor de nodos em caso de split, DEPOIS eu vou fazer pra usar o primeiro num banco
@@ -172,7 +171,7 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
 
         todo!()
 
-
+        // Now if the root already exists
 
 
     }
@@ -186,8 +185,21 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
 
     // Returns the old value or None (if the key was not found)
     fn update(&mut self, key: K, value: V) -> Option<V> {
-        todo!()
 
+        // Starts over the root index
+        let mut curr_index = self.root_idx;
+
+        // Reaches the leaf
+        while let Node::Internal(int_node) = &self.nodes[curr_index] {
+            curr_index = int_node.find_child_index(key);
+        }
+
+        // Changes the value
+        if let Node::Leaf(leaf_node) = &mut self.nodes[curr_index] {
+            leaf_node.update_value(key, value)
+        } else {
+            None
+        }
 
     }
 
@@ -207,15 +219,11 @@ pub fn teste() {
     let mut minha_arvore = BPlusTree::<usize, u64, 63>::new();
 
     {
-        if minha_arvore.root_idx.is_some() {
 
-            let meu_nodo = &minha_arvore.nodes[0];
+        let meu_nodo = minha_arvore.get(4);
 
-            if let Node::Leaf(folha) = meu_nodo {
-                println!("O valor na folha eh {:?}", folha.content[0]);
-            }
-        } else {
-            println!(" Nada ainda!!");
+        if let Some(folha) = meu_nodo {
+            println!("O valor na folha eh {:?}", folha);
         }
 
     }
@@ -223,10 +231,10 @@ pub fn teste() {
     minha_arvore.insert(3, 4);
 
 
-    let meu_nodo = &minha_arvore.nodes[0];
+    let meu_nodo = minha_arvore.get(3);
 
-    if let Node::Leaf(folha) = meu_nodo {
-        println!("O valor na folha eh {:?}", folha.content[0]);
+    if let Some(folha) = meu_nodo {
+        println!("O valor na folha eh {:?}", folha);
     } else {
         println!(" Nada ainda!!");
     }
