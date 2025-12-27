@@ -1,27 +1,26 @@
 
-struct InternalNode<K> {
+struct InternalNode<K, const M: usize> {
     keys: Vec<K>,
     children: Vec<usize>, // This is a vector of indexes, these index a vector with all the nodes
 }
 
-struct LeafNode<K, V> {
+struct LeafNode<K, V, const M: usize> {
     content: Vec<(K, V)>,
     next: Option<usize>,
 }
 
-enum Node<K, V> {
-    Internal(InternalNode<K>),
-    Leaf(LeafNode<K, V>),
+enum Node<K, V, const M: usize> {
+    Internal(InternalNode<K, M>),
+    Leaf(LeafNode<K, V, M>),
 }
 
-struct BPlusTree< K: Ord + Copy, V> {
+struct BPlusTree< K: Ord + Copy, V, const M: usize> {
     root_idx: Option<usize>,
-    nodes: Vec<Node<K, V>>,
-    degree_t: usize,
+    nodes: Vec<Node<K, V, M>>,
 }
 
 // Impl Leaf
-impl<K: Ord + Copy, V> LeafNode<K, V> {
+impl<K: Ord + Copy, V, const M: usize> LeafNode<K, V, M> {
 
     fn new(next: Option<usize>) -> Self {
 
@@ -49,7 +48,7 @@ impl<K: Ord + Copy, V> LeafNode<K, V> {
 }
 
 // Impl Internal
-impl<K: Ord + Copy> InternalNode<K> {
+impl<K: Ord + Copy, const M: usize> InternalNode<K, M> {
 
 
     // Find the index of the next child for a key using binary search over the current node
@@ -79,18 +78,17 @@ impl<K: Ord + Copy> InternalNode<K> {
 
 
 // Impl Node 
-impl<K: Ord + Copy, V> Node<K, V> {
+impl<K: Ord + Copy, V, const M: usize> Node<K, V, M> {
 
 
 }
 
-impl< K: Ord + Copy, V> BPlusTree<K, V> {
+impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
 
-    fn new(t: usize) -> Self {
+    fn new() -> Self {
         BPlusTree {
             root_idx: None,
             nodes: Vec::new(),
-            degree_t: t,
         }
     }
 
@@ -100,8 +98,16 @@ impl< K: Ord + Copy, V> BPlusTree<K, V> {
         self.nodes.len()
     }
 
+    fn degree_t(&self) -> usize {
+        M.div_ceil(2)
+    }
+
+    fn degree_m(&self) -> usize {
+        M
+    }
+
     // Gets a reference to the root node (or None)
-    fn root(&self) -> Option<&Node<K, V>> {
+    fn root(&self) -> Option<&Node<K, V, M>> {
         if let Some(idx) = self.root_idx {
             Some(&self.nodes[idx])
         } else {
@@ -198,7 +204,7 @@ impl< K: Ord + Copy, V> BPlusTree<K, V> {
 pub fn teste() {
 
 
-    let mut minha_arvore = BPlusTree::<usize, u64>::new(4);
+    let mut minha_arvore = BPlusTree::<usize, u64, 63>::new();
 
     {
         if minha_arvore.root_idx.is_some() {
