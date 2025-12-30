@@ -179,10 +179,34 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
         };
 
         if let Some(int_index) = maybe_internal {
-            self.insert_aux(key, value, int_index);
+            let prom_key_index = self.insert_aux(key, value, int_index);
+
+            if let Some(key_index) = prom_key_index {
+
+                // Here I insert on the internal node
+                if let Node::Internal(int_ref) = &mut self.nodes[index] {
+
+                    let ins_index = match int_ref.keys.binary_search(&key_index.0) {
+                        Ok(idx) => idx, // Here I will just return on collisions, may be
+                        // changed in the future. But I think there's no way I can insert repeated
+                        // values into the internal nodes because of the leaf restriction.
+                        Err(idx) => idx,
+                    };
+
+                    // Insert the key.
+                    int_ref.keys.insert(ins_index, key_index.0);
+
+                    // Insert the "pointer".
+                    int_ref.children.insert(ins_index + 1, key_index.1);
+
+                }
+
+            } else {
+                return None;
+            }
         } else {
 
-            // Here I insert. After, I fix the split
+            // Here I insert into the leaf. After, I fix the split
             // Ainda nao sei se eu permito repeticao de chave, entao vou deixar como unit ()
             if let Node::Leaf(leaf_ref) = &mut self.nodes[index] {
                 match leaf_ref.content.binary_search_by_key(&key, |pair | pair.0) {
@@ -205,8 +229,21 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
             match &mut self.nodes[index] {
                 Node::Internal(int_node) => {
 
-                    todo!();
+                    let mut new_int: InternalNode<K, M> = InternalNode::new();
 
+                    // Here I'll have to pop the first part
+                    new_int.keys = int_node.keys.split_off(split_index + 1);
+
+                    let to_promote = int_node.keys
+                        .pop()
+                        .expect("THERE SHOULD BE A VALUE HERE TO SPLIT");
+
+                    // Now the pointers
+                    new_int.children = int_node.children.split_off(split_index + 1);
+
+                    self.nodes.push(Node::Internal(new_int));
+
+                    Some((to_promote, last_index))
 
                 },
 
@@ -244,7 +281,26 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
         // push no vetor de nodos em caso de split, DEPOIS eu vou fazer pra usar o primeiro num banco
         // de posicoes removidas ou nao utilizadas
 
-        self.insert_aux(key, value, self.root_idx);
+
+        // REMEMBERING AGAIN: The return of the function is the only way to build an "upper" level
+        // or, in other words, a new root.
+
+        if let Some(root_key_index) = self.insert_aux(key, value, self.root_idx) {
+
+            let mut new_root: InternalNode<K, M> = InternalNode::new();
+            let left_index = self.root_idx;
+            let right_index = root_key_index.1;
+
+            let last_index = self.size();
+
+            new_root.keys.push(root_key_index.0);
+            new_root.children.push(left_index);
+            new_root.children.push(right_index);
+
+            self.root_idx = last_index;
+
+            self.nodes.push(Node::Internal(new_root));
+        }
 
     }
 
@@ -288,7 +344,7 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
 pub fn teste() {
 
 
-    let mut minha_arvore = BPlusTree::<usize, u64, 63>::new();
+    let mut minha_arvore = BPlusTree::<usize, u64, 3>::new();
 
     {
 
