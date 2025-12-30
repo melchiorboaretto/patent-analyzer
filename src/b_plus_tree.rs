@@ -107,6 +107,13 @@ impl<K: Ord + Copy, V, const M: usize> Node<K, V, M> {
         Node::Internal(InternalNode::new())
     }
 
+    fn should_split(&self) -> bool {
+        match self {
+            Node::Internal(int_node) => int_node.keys.len() == M,
+            Node::Leaf(leaf_node) => leaf_node.content.len() == M,
+        }
+    }
+
 }
 
 impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
@@ -161,18 +168,83 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
 
     }
 
-    fn insert(&mut self, key: K, value: V) {
+    fn insert_aux(&mut self, key: K, value: V, index: usize) -> Option<(K, usize)> {
 
-        // I've decided there will be no empty tree
+
+        let maybe_internal = match &self.nodes[index] {
+
+            Node::Internal(int_ref ) => Some(int_ref.find_child_index(key)),
+            Node::Leaf(_) => None,
+
+        };
+
+        if let Some(int_index) = maybe_internal {
+            self.insert_aux(key, value, int_index);
+        } else {
+
+            // Here I insert. After, I fix the split
+            // Ainda nao sei se eu permito repeticao de chave, entao vou deixar como unit ()
+            if let Node::Leaf(leaf_ref) = &mut self.nodes[index] {
+                match leaf_ref.content.binary_search_by_key(&key, |pair | pair.0) {
+                    Ok(_) => (),
+                    Err(index) => leaf_ref.content.insert(index, (key, value)),
+                }
+            }
+        }
+
+        // Logic to split: the key from the exactly mid goes up or the mid-right for M even
+
+        // REMINDER: HERE I'VE ALREADY INSERTED THE (KEY, VALUE), MOREOVER: ORDERED!!!
+        if self.nodes[index].should_split() {
+
+            let split_index = self.degree_t();
+            let last_index = self.size(); // This will be the index of the right split of
+            // the node
+
+
+            match &mut self.nodes[index] {
+                Node::Internal(int_node) => {
+
+                    todo!();
+
+
+                },
+
+                Node::Leaf(leaf_node) => {
+
+                    // Creates a new leaf with the "right-side" of the vector and it pointer
+                    let mut new_leaf: LeafNode<K, V, M> = LeafNode::new(leaf_node.next);
+                    new_leaf.content = leaf_node.content.split_off(split_index);
+
+                    // The key implements copy so this is cheap
+                    let to_promote = new_leaf.content[0].0;
+
+                    // Attribute the next node logic to the existing leaf
+                    leaf_node.next = Some(last_index);
+
+                    // Insert the node into the MemPool
+                    self.nodes.push(Node::Leaf(new_leaf)); // Eh importante so fazer o push aqui
+                    // pro last index estar realmente certo
+
+                    Some((to_promote, last_index))
+
+                }
+            }
+
+        } else {
+            None
+        }
+
+
+    }
+
+    fn insert(&mut self, key: K, value: V) {
 
         // NOTE: ANTES DA FUNCAO de remove funcionar eu vou simplesmente usar
         // push no vetor de nodos em caso de split, DEPOIS eu vou fazer pra usar o primeiro num banco
         // de posicoes removidas ou nao utilizadas
 
-        todo!()
-
-        // Now if the root already exists
-
+        self.insert_aux(key, value, self.root_idx);
 
     }
 
@@ -229,14 +301,24 @@ pub fn teste() {
     }
 
     minha_arvore.insert(3, 4);
+    minha_arvore.insert(7, 2);
+    minha_arvore.insert(11, 8);
+    minha_arvore.insert(8, 3);
+    minha_arvore.insert(1, 6);
 
+    let outro = minha_arvore.update(11, 1);
 
-    let meu_nodo = minha_arvore.get(3);
+    minha_arvore.insert(4, outro.unwrap());
 
-    if let Some(folha) = meu_nodo {
-        println!("O valor na folha eh {:?}", folha);
-    } else {
-        println!(" Nada ainda!!");
+    for i in 0..13 {
+
+        let meu_nodo = minha_arvore.get(i);
+
+        if let Some(folha) = meu_nodo {
+            println!("O valor na folha de chave {} eh {:?}", i, folha);
+        } else {
+            println!(" Nada ainda!!");
+        }
     }
 
 }
