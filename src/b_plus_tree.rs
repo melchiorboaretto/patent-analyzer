@@ -156,6 +156,7 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
 
         // Go to the corresponding leaf
         while let Node::Internal(int_node) = curr_node {
+            println!("Recursou");
             curr_node = &self.nodes[int_node.find_child_index(key)];
         }
 
@@ -221,7 +222,15 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
         // REMINDER: HERE I'VE ALREADY INSERTED THE (KEY, VALUE), MOREOVER: ORDERED!!!
         if self.nodes[index].should_split() {
 
-            let split_index = self.degree_t();
+            let split_index = match &self.nodes[index] {
+                Node::Internal(int) => {
+                    int.keys.len() / 2 // [20 30 (40) | 50]     [20 30 (40) | 50 60] split_index + 1 INTERNO
+                                       // [20 30 | (40) 50]    [20 30 | (40) 50 60] split_index FOLHA
+                },
+                Node::Leaf(leaf) => {
+                    leaf.content.len() / 2 // Aqui ta certo
+                },
+            };
             let last_index = self.size(); // This will be the index of the right split of
             // the node
 
