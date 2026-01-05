@@ -2,8 +2,6 @@ mod node;
 mod utils;
 mod iter;
 
-use std::hint::unreachable_unchecked;
-
 use node::{
     InternalNode,
     LeafNode,
@@ -12,7 +10,7 @@ use node::{
 
 use crate::b_plus_tree::iter::BPlusTreeIter;
 
-struct BPlusTree< K: Ord + Copy, V, const M: usize> {
+pub struct BPlusTree< K: Ord + Copy, V, const M: usize> {
     root_idx: usize,
     nodes: Vec<Node<K, V, M>>,
 }
@@ -158,7 +156,7 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
                     }
                 } else {
                     unsafe {
-                        unreachable_unchecked();
+                        std::hint::unreachable_unchecked();
                     }
                 }
 
@@ -177,7 +175,7 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
                     }
                 } else {
                     unsafe {
-                        unreachable_unchecked();
+                        std::hint::unreachable_unchecked();
                     }
                 }
 
@@ -211,43 +209,12 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
 
 }
 
-// Ate agora tudo funcionando
-pub fn teste() {
+impl<'a, K: Copy + Ord, V, const M: usize> IntoIterator for &'a BPlusTree<K, V, M> {
+    type Item = &'a (K, V);
+    type IntoIter = BPlusTreeIter<'a, K, V, M>;
 
-
-    let mut minha_arvore = BPlusTree::<usize, u64, 3>::new();
-
-    {
-
-        let meu_nodo = minha_arvore.get(4);
-
-        if let Some(folha) = meu_nodo {
-            println!("O valor na folha eh {:?}", folha);
-        }
-
+    fn into_iter(self) -> Self::IntoIter {
+        self.range(..)
     }
-
-    minha_arvore.insert(3, 4);
-    minha_arvore.insert(7, 2);
-    minha_arvore.insert(11, 8);
-    minha_arvore.insert(8, 3);
-    minha_arvore.insert(1, 6);
-
-    let outro = minha_arvore.update(11, 1);
-
-    minha_arvore.insert(4, outro.unwrap());
-
-    for i in 0..13 {
-
-        let meu_nodo = minha_arvore.get(i);
-
-        if let Some(folha) = meu_nodo {
-            println!("O valor na folha de chave {} eh {:?}", i, folha);
-        } else {
-            println!(" Nada ainda!!");
-        }
-    }
-
 }
-
 
