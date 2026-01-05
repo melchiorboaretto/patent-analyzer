@@ -2,11 +2,15 @@ mod node;
 mod utils;
 mod iter;
 
+use std::hint::unreachable_unchecked;
+
 use node::{
     InternalNode,
     LeafNode,
     Node,
 };
+
+use crate::b_plus_tree::iter::BPlusTreeIter;
 
 struct BPlusTree< K: Ord + Copy, V, const M: usize> {
     root_idx: usize,
@@ -42,21 +46,37 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
         &self.nodes[self.root_idx]
     }
 
+    pub fn find_first_leaf_index(&self) -> usize {
+        let mut curr_node = self.root();
+        let mut curr_index = self.root_idx;
+
+        while let Node::Internal(int_node_ref) = curr_node {
+            curr_index = int_node_ref.children[0];
+            curr_node = &self.nodes[curr_index];
+        }
+
+        curr_index
+    }
+
+    pub fn find_leaf_index(&self, key: K) -> usize {
+        let mut curr_node = self.root();
+        let mut curr_index = self.root_idx;
+
+        while let Node::Internal(int_node_ref) = curr_node {
+            curr_index = int_node_ref.find_child_index(key);
+            curr_node = &self.nodes[curr_index];
+        }
+
+        curr_index
+    }
+
     // Returns a reference to the value corresponding to the key.
     // May be None if the key cannot be find.
     pub fn get(&self, key: K) -> Option<&V> {
 
-        let mut curr_node;
+        let leaf_index = self.find_leaf_index(key);
 
-        // Get the root or return None, alright
-        curr_node = self.root();
-
-        // Go to the corresponding leaf
-        while let Node::Internal(int_node) = curr_node {
-            curr_node = &self.nodes[int_node.find_child_index(key)];
-        }
-
-        if let Node::Leaf(leaf_node) = curr_node {
+        if let Node::Leaf(leaf_node) = &self.nodes[leaf_index] {
             leaf_node.retrieve_value(key)
         } else {
             None
@@ -119,6 +139,71 @@ impl< K: Ord + Copy, V, const M: usize> BPlusTree<K, V, M> {
             None
         }
 
+    }
+
+    pub fn range<'a, R: std::ops::RangeBounds<K>>(&'a self, range: R) -> BPlusTreeIter<'a, K, V, M> {
+
+        let cursor_index;
+        let curr_index;
+
+        match range.start_bound() {
+            std::ops::Bound::Excluded(ex_key) => {
+                let leaf_idx = self.find_leaf_index(*ex_key);
+                cursor_index = Some(leaf_idx);
+
+                if let Node::Leaf(leaf_ref) = &self.nodes[leaf_idx] {
+                    curr_index = match leaf_ref.content.binary_search_by_key(ex_key, |pair| pair.0) {
+                        Ok(ok_idx) => ok_idx + 1, // The exact idx must be excluded
+                        Err(err_idx) => err_idx,
+                    }
+                } else {
+                    unsafe {
+                        unreachable_unchecked();
+                    }
+                }
+
+
+            },
+            std::ops::Bound::Included(in_key) => {
+                let leaf_idx = self.find_leaf_index(*in_key);
+                cursor_index = Some(leaf_idx);
+
+                if let Node::Leaf(leaf_ref) = &self.nodes[leaf_idx] {
+                    curr_index = match leaf_ref.content.binary_search_by_key(in_key, |pair| pair.0) {
+                        //  key = 2 [1, 2, 3, 4, 5, 6] -> index = 1 (o exato)
+                        //  key = 2 [1, 3, 5, 7] -> index = 1 (o exato pra comecar a busca tambem)
+                        Ok(ok_idx) => ok_idx,
+                        Err(err_idx) => err_idx,
+                    }
+                } else {
+                    unsafe {
+                        unreachable_unchecked();
+                    }
+                }
+
+
+            },
+
+            std::ops::Bound::Unbounded => {
+                let leaf_idx = self.find_first_leaf_index();
+                cursor_index = Some(leaf_idx);
+
+                curr_index = 0;
+
+            },
+        };
+
+
+
+
+        let upper_bound =  range.end_bound().cloned();
+
+        BPlusTreeIter::new (
+            &self.nodes,
+            cursor_index,
+            curr_index,
+            upper_bound,
+        )
     }
 
 
