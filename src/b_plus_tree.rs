@@ -123,39 +123,30 @@ impl< K: Ord + Copy, V> BPlusTree<K, V> {
 
 
 
+#[cfg(test)]
+mod test {
 
+    use super::*;
 
-// Ate agora tudo funcionando
-pub fn teste() {
+    #[test]
+    fn insert_and_read() {
 
-
-    let mut minha_arvore = BPlusTree::<usize, u64>::new(4);
-
-    {
-        if minha_arvore.root_idx.is_some() {
-
-            let meu_nodo = &minha_arvore.nodes[0];
-
-            if let Node::Leaf(folha) = meu_nodo {
-                println!("O valor na folha eh {:?}", folha.content[0]);
-            }
-        } else {
-            println!(" Nada ainda!!");
-        }
+        todo!();
 
     }
 
-    minha_arvore.insert(3, 4);
+    #[test]
+    fn insert_and_scan() {
 
+        todo!();
 
-    let meu_nodo = &minha_arvore.nodes[0];
+    }
 
-    if let Node::Leaf(folha) = meu_nodo {
-        println!("O valor na folha eh {:?}", folha.content[0]);
-    } else {
-        println!(" Nada ainda!!");
+    #[test]
+    fn insert_update_scan() {
+
+        todo!();
+
     }
 
 }
-
-
