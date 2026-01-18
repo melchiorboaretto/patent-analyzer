@@ -127,7 +127,7 @@ impl InvertedIndex {
         let chunk = unsafe {
             let mut bytes = [0; PAGE_SIZE as usize];
 
-            file.read_exact_at(InvertedIndex::offset(index), &mut bytes)
+            file.read_at(InvertedIndex::offset(index), &mut bytes)
                 .expect("ERROR READING CHUNK");
             IdChunk::from_bytes(&bytes)
         };
@@ -167,7 +167,9 @@ impl InvertedIndex {
     fn append(&mut self, chunk: IdChunk) {
 
         // NOTE: Fourth error not handled
-        let mut file = RandomAccessFile::open(&self.path)
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .open(&self.path)
             .expect("ERROR OPENING FILE");
 
         file.write_all_at(self.to_append_offset(), chunk.as_bytes())
