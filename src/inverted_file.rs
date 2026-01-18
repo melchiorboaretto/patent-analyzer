@@ -8,8 +8,7 @@ const MAX_IDS_PER_CHUNK: u64 = ((PAGE_SIZE as usize - (size_of::<u64>() + size_o
 use std::{fs, io::{ErrorKind, Write}};
 
 use positioned_io::{
-    ReadAt,
-    RandomAccessFile,
+    RandomAccessFile, ReadAt, WriteAt
 };
 
 #[repr(C)]
@@ -128,7 +127,7 @@ impl InvertedIndex {
         let chunk = unsafe {
             let mut bytes = [0; PAGE_SIZE as usize];
 
-            file.read_exact_at(index * PAGE_SIZE + METADATA_PAGES, &mut bytes)
+            file.read_exact_at(InvertedIndex::offset(index), &mut bytes)
                 .expect("ERROR READING CHUNK");
             IdChunk::from_bytes(&bytes)
         };
@@ -163,6 +162,44 @@ impl InvertedIndex {
         }
 
         ids_vector
+    }
+
+    fn append(&mut self, chunk: IdChunk) {
+
+        // NOTE: Fourth error not handled
+        let mut file = RandomAccessFile::open(&self.path)
+            .expect("ERROR OPENING FILE");
+
+        file.write_all_at(self.to_append_offset(), chunk.as_bytes())
+            .expect("A CRITICAL ERROR HAS OCCURRED!");
+
+        self.metadata.file_len += 1;
+
+        file.write_all_at(0, self.metadata.as_bytes())
+            .expect("A CRITICAL ERROR HAS OCCURRED!");
+
+    }
+
+    fn insert(&mut self, chunk: IdChunk) {
+
+        if self.metadata.available == 0 {
+
+            self.append(chunk);
+
+        } else {
+
+            todo!("HERE I WILL IMPLEMENT A BEST FIT ALGORITHM");
+
+        }
+
+    }
+
+    fn offset(index: u64) -> u64 {
+        (index + METADATA_PAGES) * PAGE_SIZE
+    }
+
+    fn to_append_offset(&self) -> u64 {
+        InvertedIndex::offset(self.metadata.file_len)
     }
 
 }
