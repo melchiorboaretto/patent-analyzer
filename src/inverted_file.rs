@@ -5,7 +5,14 @@ const METADATA_FIELDS: u64 = 3;
 const MAX_IDS_PER_CHUNK: u64 = ((PAGE_SIZE as usize - (size_of::<u64>() + size_of::<i64>())) / size_of::<u64>()) as u64;
 
 
-use std::{fs, io::{ErrorKind, Write}};
+use std::{
+    fs, 
+    io::{
+        ErrorKind,
+        Result,
+        Write
+    }
+};
 
 use positioned_io::{
     RandomAccessFile, ReadAt, WriteAt
@@ -70,22 +77,20 @@ impl InvertedIndex {
 
     /// Initializes the InvertedIndex using a known file path. If the file does not exist
     /// it will be created, if it does, nothing more happens.
-    pub fn new(path: String) -> InvertedIndex {
+    pub fn new(path: String) -> Result<InvertedIndex> {
         match fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&path) {
             Ok(mut new_file) => {
 
-                // NOTE: First error not handled
                 let metadata = Metadata::new();
-                new_file.write_all(metadata.as_bytes())
-                .expect("A CRITICAL ERROR HAS OCCURRED!");
+                new_file.write_all(metadata.as_bytes())?;
 
-                InvertedIndex {
+                Ok(InvertedIndex {
                     path,
                     metadata,
-                }
+                })
             },
 
             Err(error) => {
@@ -94,24 +99,22 @@ impl InvertedIndex {
 
                     let file =  fs::OpenOptions::new()
                         .read(true)
-                        .open(&path)
-                        .expect("A CRITICAL ERROR HAS OCCURRED!");
+                        .open(&path)?;
 
                     let mut bytes_buffer = [0u8; PAGE_SIZE as usize];
-                    file.read_exact_at(0, &mut bytes_buffer)
-                        .expect("A CRITICAL ERRROR HAS OCCURRED!");
+                    file.read_exact_at(0, &mut bytes_buffer)?;
 
                     let metadata = unsafe {
                         Metadata::from_bytes(&bytes_buffer)
                     };
 
-                    InvertedIndex {
+                    Ok(InvertedIndex {
                         path,
                         metadata,
-                    }
+                    })
 
                 } else {
-                    panic!("A CRITICAL ERROR HAS OCCURRED!");
+                    Err(error)
                 }
 
             },
@@ -121,38 +124,37 @@ impl InvertedIndex {
     /// Aux function to read a block of the inverted index, appends it to a vector.
     /// It is better if the vector is already initialized with the right size to avoid
     /// syscalls asking more memory
-    fn read_block_to_vec(&self, ids: &mut Vec<u64>, file: &RandomAccessFile, index: u64) -> Option<u64> {
+    fn read_block_to_vec(&self, ids: &mut Vec<u64>, file: &RandomAccessFile, index: u64) -> Result<Option<u64>> {
 
-        // NOTE: Second error not handled
         let chunk = unsafe {
             let mut bytes = [0; PAGE_SIZE as usize];
 
-            file.read_at(InvertedIndex::offset(index), &mut bytes)
-                .expect("ERROR READING CHUNK");
+            file.read_exact_at(InvertedIndex::offset(index), &mut bytes)?;
             IdChunk::from_bytes(&bytes)
         };
 
         ids.extend_from_slice(&chunk.content[0..chunk.len()]);
 
-        if chunk.next != -1 {
+        Ok(if chunk.next != -1 {
             Some(chunk.next as u64)
         } else {
             None
-        }
+        })
     }
 
     /// Retrieves all the ids for a given index
-    pub fn get_ids(&self, mut index: u64) -> Vec<u64> {
+    pub fn get_ids(&self, mut index: u64) -> Result<Vec<u64>> {
+        // NOTE: THIS FUNCTION MAY NOT BE USED TO INSERT AN ID / UPDATE A BLOCK.
+        // ITS WISE (IF AN UPDATE IS WANTED), TO READ THE BLOCK AND SAVE ITS "CREDENTIALS",
+        // read_block_to_vec() does something alike. 
 
-        // NOTE: Third error not handled
-        let file = RandomAccessFile::open(&self.path)
-            .expect("ERROR OPENING FILE");
+        let file = RandomAccessFile::open(&self.path)?;
 
         let mut ids_vector = Vec::new();
 
         loop {
 
-            let next = self.read_block_to_vec(&mut ids_vector, &file, index);
+            let next = self.read_block_to_vec(&mut ids_vector, &file, index)?;
 
             if let Some(next_offset) = next {
                 index = next_offset;
@@ -161,38 +163,38 @@ impl InvertedIndex {
             }
         }
 
-        ids_vector
+        Ok(ids_vector)
     }
 
-    fn append(&mut self, chunk: IdChunk) {
+    fn append(&mut self, chunk: IdChunk) -> Result<()>{
 
-        // NOTE: Fourth error not handled
         let mut file = fs::OpenOptions::new()
             .write(true)
-            .open(&self.path)
-            .expect("ERROR OPENING FILE");
+            .open(&self.path)?;
 
-        file.write_all_at(self.to_append_offset(), chunk.as_bytes())
-            .expect("A CRITICAL ERROR HAS OCCURRED!");
+        file.write_all_at(self.to_append_offset(), chunk.as_bytes())?;
 
         self.metadata.file_len += 1;
 
-        file.write_all_at(0, self.metadata.as_bytes())
-            .expect("A CRITICAL ERROR HAS OCCURRED!");
+        file.write_all_at(0, self.metadata.as_bytes())?;
+
+        Ok(())
 
     }
 
-    fn insert(&mut self, chunk: IdChunk) {
+    fn insert(&mut self, chunk: IdChunk) -> Result<()> {
 
         if self.metadata.available == 0 {
 
-            self.append(chunk);
+            self.append(chunk)?;
 
         } else {
 
             todo!("HERE I WILL IMPLEMENT A BEST FIT ALGORITHM");
 
         }
+
+        Ok(())
 
     }
 
