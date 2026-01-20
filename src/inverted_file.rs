@@ -121,17 +121,30 @@ impl InvertedIndex {
         }
     }
 
+    // Get the necessary data for adding more IDs, the last chunk index and itself
+    fn last_chunk_id_and_next(&self, file: &RandomAccessFile, mut index: u64) -> Result<(u64, IdChunk)> {
+
+        let mut chunk = IdChunk::read_new(file, index)?;
+
+        loop {
+            if chunk.next == -1 {
+                break Ok((index, chunk));
+            }
+
+            index = chunk.next();
+            chunk = IdChunk::read_new(file, index)?;
+
+        }
+
+    }
+
+
     /// Aux function to read a block of the inverted index, appends it to a vector.
     /// It is better if the vector is already initialized with the right size to avoid
     /// syscalls asking more memory
-    fn read_block_to_vec(&self, ids: &mut Vec<u64>, file: &RandomAccessFile, index: u64) -> Result<Option<u64>> {
+    fn read_chunk_to_vec(&self, ids: &mut Vec<u64>, file: &RandomAccessFile, index: u64) -> Result<Option<u64>> {
 
-        let chunk = unsafe {
-            let mut bytes = [0; PAGE_SIZE as usize];
-
-            file.read_exact_at(InvertedIndex::offset(index), &mut bytes)?;
-            IdChunk::from_bytes(&bytes)
-        };
+        let chunk = IdChunk::read_new(file, index)?;
 
         ids.extend_from_slice(&chunk.content[0..chunk.len()]);
 
@@ -143,7 +156,7 @@ impl InvertedIndex {
     }
 
     /// Retrieves all the ids for a given index
-    pub fn get_ids(&self, mut index: u64) -> Result<Vec<u64>> {
+    pub fn retrieve_ids(&self, mut index: u64) -> Result<Vec<u64>> {
         // NOTE: THIS FUNCTION MAY NOT BE USED TO INSERT AN ID / UPDATE A BLOCK.
         // ITS WISE (IF AN UPDATE IS WANTED), TO READ THE BLOCK AND SAVE ITS "CREDENTIALS",
         // read_block_to_vec() does something alike. 
@@ -154,7 +167,7 @@ impl InvertedIndex {
 
         loop {
 
-            let next = self.read_block_to_vec(&mut ids_vector, &file, index)?;
+            let next = self.read_chunk_to_vec(&mut ids_vector, &file, index)?;
 
             if let Some(next_offset) = next {
                 index = next_offset;
@@ -166,11 +179,7 @@ impl InvertedIndex {
         Ok(ids_vector)
     }
 
-    fn append(&mut self, chunk: IdChunk) -> Result<()>{
-
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .open(&self.path)?;
+    fn append(&mut self, file: &mut RandomAccessFile, chunk: IdChunk) -> Result<()>{
 
         file.write_all_at(self.to_append_offset(), chunk.as_bytes())?;
 
@@ -182,11 +191,11 @@ impl InvertedIndex {
 
     }
 
-    fn insert(&mut self, chunk: IdChunk) -> Result<()> {
+    fn insert(&mut self, file: &mut RandomAccessFile, chunk: IdChunk) -> Result<()> {
 
         if self.metadata.available == 0 {
 
-            self.append(chunk)?;
+            self.append(file, chunk)?;
 
         } else {
 
@@ -226,6 +235,15 @@ impl IdChunk {
         }
     }
 
+    fn read_new(file: &RandomAccessFile, index: u64) -> Result<Self> {
+        unsafe {
+            let mut bytes = [0; PAGE_SIZE as usize];
+
+            file.read_exact_at(InvertedIndex::offset(index), &mut bytes)?;
+            Ok(IdChunk::from_bytes(&bytes))
+        }
+    }
+
     /// Tries to insert the given ID into the chunk, returns true if it could.
     /// Else, returns false.
     /// NOTE: It WON'T adjust any next pointers, this must be done manually.
@@ -238,6 +256,11 @@ impl IdChunk {
             true
         }
 
+    }
+
+    // adjust the next field of a chunk. 
+    fn next_is(&mut self, index: u64) {
+        self.next = index as i64;
     }
 
     /// Converts an IdChunk to its corresponding bytes, ready to be written in a binary file.
@@ -267,6 +290,10 @@ impl IdChunk {
     /// Give the length of a chunk with a "size" type, easier to deal with.
     fn len(&self) -> usize {
         self.len as usize
+    }
+
+    fn next(&self) -> u64 {
+        self.next as u64
     }
 
 }
