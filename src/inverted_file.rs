@@ -6,8 +6,7 @@ const MAX_IDS_PER_CHUNK: u64 = ((PAGE_SIZE as usize - (size_of::<u64>() + size_o
 
 
 use std::{
-    fs, 
-    io::{
+    fs, io::{
         ErrorKind,
         Result,
         Write
@@ -157,9 +156,6 @@ impl InvertedIndex {
 
     /// Retrieves all the ids for a given index
     pub fn retrieve_ids(&self, mut index: u64) -> Result<Vec<u64>> {
-        // NOTE: THIS FUNCTION MAY NOT BE USED TO INSERT AN ID / UPDATE A BLOCK.
-        // ITS WISE (IF AN UPDATE IS WANTED), TO READ THE BLOCK AND SAVE ITS "CREDENTIALS",
-        // read_block_to_vec() does something alike. 
 
         let file = RandomAccessFile::open(&self.path)?;
 
@@ -205,6 +201,60 @@ impl InvertedIndex {
         } else {
 
             todo!("HERE I WILL IMPLEMENT A BEST FIT ALGORITHM");
+
+        })
+
+    }
+
+    fn insert_all(&mut self, index: Option<u64>, ids: Vec<u64>) -> Result<Option<u64>> {
+
+        let mut file = RandomAccessFile::open(&self.path)?;
+        let first_chunk_index: Option<u64>; // Last inserted chunk
+        let chunk: IdChunk;
+
+
+        if let Some(index) = index {
+            let first_idx_and_chunk = self.last_chunk_id_and_next(&file, index)?;
+            first_chunk_index = Some(first_idx_and_chunk.0);
+            chunk = first_idx_and_chunk.1;
+
+        } else {
+            first_chunk_index = None;
+            chunk = IdChunk::new();
+        }
+
+
+        let mut chunks_iter = chunk
+            .insert_all(ids)
+            .into_iter()
+            .rev();
+
+        let mut first = chunks_iter.next_back().expect("THIS MUST EXIST");
+
+        let mut next_index;
+
+        if let Some(last_chunk) = chunks_iter.next() {
+            next_index = self.insert(&mut file, last_chunk)?;
+
+            for mut item in chunks_iter {
+
+                item.next_is(next_index);
+                next_index = self.insert(&mut file, item)?;
+            }
+
+            first.next_is(next_index);
+        } else {
+            first.next_is(u64::MAX); // Equivalent to -1
+        }
+
+        Ok(if let Some(real_index) = first_chunk_index {
+
+            file.write_all_at(InvertedIndex::offset(real_index), first.as_bytes())?;
+            None
+
+        } else {
+
+            Some(self.insert(&mut file, first)?)
 
         })
 
