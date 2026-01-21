@@ -179,31 +179,34 @@ impl InvertedIndex {
         Ok(ids_vector)
     }
 
-    fn append(&mut self, file: &mut RandomAccessFile, chunk: IdChunk) -> Result<()>{
+    /// Appends an IdChunk into the inverted file. Returns the index.
+    fn append(&mut self, file: &mut RandomAccessFile, chunk: IdChunk) -> Result<u64>{
 
-        file.write_all_at(self.to_append_offset(), chunk.as_bytes())?;
+        let append_index = self.to_append_index();
+
+        file.write_all_at(InvertedIndex::offset(append_index), chunk.as_bytes())?;
 
         self.metadata.file_len += 1;
 
         file.write_all_at(0, self.metadata.as_bytes())?;
 
-        Ok(())
+        Ok(append_index)
 
     }
 
-    fn insert(&mut self, file: &mut RandomAccessFile, chunk: IdChunk) -> Result<()> {
+    /// Insert an IdChunk into the inverted file using the best possible position.
+    /// Returns the index where it was inserted
+    fn insert(&mut self, file: &mut RandomAccessFile, chunk: IdChunk) -> Result<u64> {
 
-        if self.metadata.available == 0 {
+        Ok(if self.metadata.available == 0 {
 
-            self.append(file, chunk)?;
+            self.append(file, chunk)?
 
         } else {
 
             todo!("HERE I WILL IMPLEMENT A BEST FIT ALGORITHM");
 
-        }
-
-        Ok(())
+        })
 
     }
 
@@ -211,8 +214,8 @@ impl InvertedIndex {
         (index + METADATA_PAGES) * PAGE_SIZE
     }
 
-    fn to_append_offset(&self) -> u64 {
-        InvertedIndex::offset(self.metadata.file_len)
+    fn to_append_index(&self) -> u64 {
+        self.metadata.file_len
     }
 
 }
@@ -235,6 +238,7 @@ impl IdChunk {
         }
     }
 
+    /// READS an IdChunk instead of creating a blank one
     fn read_new(file: &RandomAccessFile, index: u64) -> Result<Self> {
         unsafe {
             let mut bytes = [0; PAGE_SIZE as usize];
@@ -246,7 +250,7 @@ impl IdChunk {
 
     /// Tries to insert the given ID into the chunk, returns true if it could.
     /// Else, returns false.
-    /// NOTE: It WON'T adjust any next pointers, this must be done manually.
+    /// It WON'T adjust any next pointers, this must be done manually.
     fn try_insert(&mut self, id: u64) -> bool {
         if self.len == MAX_IDS_PER_CHUNK {
             false
@@ -258,9 +262,36 @@ impl IdChunk {
 
     }
 
-    // adjust the next field of a chunk. 
+    /// adjust the next field of a chunk. 
     fn next_is(&mut self, index: u64) {
         self.next = index as i64;
+    }
+
+    /// Insert all the given indexes into the IdChunk, consuming it and returning a vector with all
+    /// the chunks needed for the exceeding values. The first chunk of the vector is always the
+    /// consumed one.
+    ///
+    /// NONE OF THE NEXT POINTERS ARE ADJUSTED. IT MUST BE DONE WHEN INSERTING THEM INTO THE FILE.
+    fn insert_all(self, ids: Vec<u64>) -> Vec<IdChunk> {
+
+        let mut chunk = self;
+        let mut return_chunks = Vec::with_capacity(ids.len().div_ceil(MAX_IDS_PER_CHUNK as usize));
+
+        for item in ids {
+
+            if !chunk.try_insert(item) {
+                return_chunks.push(chunk);
+                chunk = IdChunk::new();
+
+                chunk.try_insert(item); // This is always true because the chunk is new.
+            }
+
+        }
+
+        return_chunks.push(chunk);
+
+        return_chunks
+
     }
 
     /// Converts an IdChunk to its corresponding bytes, ready to be written in a binary file.
