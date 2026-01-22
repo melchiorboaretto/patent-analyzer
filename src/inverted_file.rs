@@ -120,6 +120,17 @@ impl InvertedIndex {
         }
     }
 
+    fn open_rw(&self) -> Result<RandomAccessFile>{
+
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.path)?;
+
+        RandomAccessFile::try_new(file)
+
+    }
+
     // Get the necessary data for adding more IDs, the last chunk index and itself
     fn last_chunk_id_and_next(&self, file: &RandomAccessFile, mut index: u64) -> Result<(u64, IdChunk)> {
 
@@ -157,7 +168,7 @@ impl InvertedIndex {
     /// Retrieves all the ids for a given index
     pub fn retrieve_ids(&self, mut index: u64) -> Result<Vec<u64>> {
 
-        let file = RandomAccessFile::open(&self.path)?;
+        let file = self.open_rw()?;
 
         let mut ids_vector = Vec::new();
 
@@ -206,9 +217,9 @@ impl InvertedIndex {
 
     }
 
-    fn insert_all(&mut self, index: Option<u64>, ids: Vec<u64>) -> Result<Option<u64>> {
+    pub fn insert_all(&mut self, index: Option<u64>, ids: Vec<u64>) -> Result<Option<u64>> {
 
-        let mut file = RandomAccessFile::open(&self.path)?;
+        let mut file = self.open_rw()?;
         let first_chunk_index: Option<u64>; // Last inserted chunk
         let chunk: IdChunk;
 
@@ -379,3 +390,44 @@ impl IdChunk {
 
 }
 
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use tempfile::*;
+    use rand::*;
+    use rand::seq::SliceRandom;
+
+    #[test]
+    fn create_and_manipulate_inverted_file() {
+        let tempdir = tempdir().expect("UNABLE TO CREATE A TEMPORARY DIRECTORY");
+
+        let file_path = tempdir
+            .path()
+            .join("testfile.idx")
+            .to_string_lossy()
+            .into_owned();
+
+        let mut inv_index = InvertedIndex::new(file_path).expect("UNABLE TO CREATE THE INV. FILE");
+
+        let mut ids = Vec::new();
+        let mut rng = rng();
+
+        for num in 0..PAGE_SIZE*9 {
+
+            ids.push(num);
+
+        }
+
+        ids.shuffle(&mut rng);
+
+        let ins_id = inv_index.insert_all(None, ids.clone()).expect("UNABLE TO INSERT THE IDS");
+
+        let test_ids = inv_index.retrieve_ids(ins_id.unwrap()).expect("UNABLE TO RETRIEVE IDS");
+
+        assert_eq!(ids, test_ids);
+
+    }
+
+}
