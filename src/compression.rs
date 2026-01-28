@@ -76,6 +76,10 @@ impl CompressedString {
 
                 text.push(punctuation as u8);
 
+                if matches!(punctuation, ',' | '.' | '-' | ':') {
+                    text.push(b' ');
+                }
+
             } else if let Some(shorten_word) = str_to_index.get(word) { // If it is in the
                     // dictionary
                  text.push(*shorten_word as u8);
@@ -141,11 +145,16 @@ impl CompressedString {
                     return_string.push(unicode_char);
                 }
 
-                b'\'' | b'"' | b'!' | b'?' | b')' | b'-' | b']' | b'}' | b':' | b';' | b',' | b'.' => {
+                b'\'' | b'"' | b'!' | b'?' | b')' | b']' | b'}' | b';' => {
 
-                    return_string.pop();
+                    let last_char = return_string.pop();
+
+                    if let Some(last) = last_char  && last != ' ' {
+                        return_string.push(last);
+                    }
 
                     return_string.push(*byte as char);
+                    return_string.push(' ');
 
                 }
 
@@ -158,12 +167,11 @@ impl CompressedString {
                 0x80..=0xFF => {
 
                     return_string.push_str(&self.dict.entries[(*byte - 0x80) as usize]);
+                    return_string.push(' ');
 
                 },
 
             }
-
-            return_string.push(' ');
 
         }
 
@@ -182,4 +190,42 @@ fn utf8_len(byte: u8) -> u8 {
 
     byte.leading_ones() as u8
 
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+
+    #[test]
+    fn compress_and_decompress() {
+
+        let test_string = "Gaúcha Zero Hora 28/01/2026 - 16:50h Anvisa aprova cultivo de cannabis para fins medicinais.\
+            De acordo com o texto, a produção de cannabis só será autorizada para fins medicinais e farmacêuticos, \
+            sendo restrita a pessoas jurídicas. Os estabelecimentos só poderão produzir a quantidade necessária para atender a uma demanda \
+            de medicamentos autorizada previamente. Ainda conforme a proposta, o teor de THC deverá ser no máximo de 0,3%. As áreas de cultivo \
+            serão limitadas, devendo ser georreferenciadas, fotografadas e monitoradas. Segundo a Anvisa, tratam-se de áreas pequenas, que serão \
+            acompanhadas de perto pela agência. Para o transporte dos produtos, a Anvisa informou que será \
+            firmada uma parceria com a Polícia Rodoviária Federal.";
+
+        let dict_words = ["de", "a", "o", "que", "e", "do", "da", "em", "um", "para", "é",
+            "com", "não", "uma", "os", "no", "se", "na", "por", "mais", "as", "dos", "como", "mas", "foi",
+            "ao", "ele", "das", "tem", "à", "seu", "sua", "ou", "ser", "quando", "muito", "nos", "já", "está",
+            "eu", "também", "só", "pelo", "pela", "até", "isso", "ela", "entre", "depois", "sem", "mesmo", "aos",
+            "ter", "seus", "quem", "nas", "me", "esse", "eles", "estão", "você", "tinha", "foram", "essa", "num",
+            "nem", "suas", "meu", "às", "minha", "têm", "numa", "pelos", "elas", "havia", "seja", "qual", "era",
+            "fazer", "dois", "toda", "outro", "te", "comigo", "fui", "foi", "estou", "agora", "pois", "deve", "do",
+            "diz", "está", "toda", "nossa", "pode", "tão", "alguns", "onde", "aqui", "será", "vida", "antes", "ano",
+            "casa", "dia", "homem", "moço", "senhor", "palavra", "filho", "noite", "amigo", "bem", "rua", "vida", "hora",
+            "coração", "pai", "pessoa", "mulher", "amor", "verdade", "ideia", "mãe", "marido", "espírito", "fim"];
+
+        let dict = Dictionary {
+            entries: dict_words.iter().map(|str| str.to_string()).collect(),
+        };
+
+        let compressed = CompressedString::compress(test_string, Arc::new(dict));
+
+        assert_eq!(compressed.decompress(), test_string);
+
+    }
 }
