@@ -1,5 +1,6 @@
 
 const DICTIONARY_SIZE: usize = 128;
+const UNICODE_ESCAPE_BYTE: u8 = 0x00;
 
 use std::{
     collections::HashMap,
@@ -67,7 +68,7 @@ impl CompressedString {
                             let extension = character
                                 .encode_utf8(&mut buffer)
                                 .as_bytes();
-                            text.push(0x00);
+                            text.push(UNICODE_ESCAPE_BYTE);
                             text.extend_from_slice(extension);
                         }
                     }
@@ -90,7 +91,7 @@ impl CompressedString {
                                 .encode_utf8(&mut buffer)
                                 .as_bytes();
 
-                            text.push(0x00);
+                            text.push(UNICODE_ESCAPE_BYTE);
                             text.extend_from_slice(extension);
                         }
 
@@ -108,5 +109,77 @@ impl CompressedString {
             text,
         }
     }
+
+    fn decompress(&self) -> String {
+
+        let str_len = self.text.len() * 2; // Chances are the string will be at least 2x larger than
+        // the compressed version
+        let mut return_string = String::with_capacity(str_len);
+        let mut text_iter = self.text.iter();
+
+        while let Some(byte) = text_iter.next() {
+
+            match *byte {
+
+                UNICODE_ESCAPE_BYTE => {
+                    let mut buffer = [0u8; 4];
+                    let first = *text_iter.next().expect("Bad unicode escape.");
+
+                    let len = utf8_len(first);
+                    buffer[0] = first;
+
+                    for idx in 1..len {
+                        buffer[idx as usize] = *text_iter.next().expect("Bad unicode escape.");
+                    }
+
+                    let unicode_char = str::from_utf8(&buffer)
+                        .unwrap_or("")
+                        .chars()
+                        .next()
+                        .unwrap();
+
+                    return_string.push(unicode_char);
+                }
+
+                b'\'' | b'"' | b'!' | b'?' | b')' | b'-' | b']' | b'}' | b':' | b';' | b',' | b'.' => {
+
+                    return_string.pop();
+
+                    return_string.push(*byte as char);
+
+                }
+
+                1..=0x7F => {
+
+                    return_string.push(*byte as char);
+
+                },
+
+                0x80..=0xFF => {
+
+                    return_string.push_str(&self.dict.entries[(*byte - 0x80) as usize]);
+
+                },
+
+            }
+
+            return_string.push(' ');
+
+        }
+
+        if let Some(maybe_whitespace) = return_string.chars().next_back() && maybe_whitespace == ' ' {
+            return_string.pop();
+        }
+
+        return_string
+
+    }
+
+}
+
+#[inline]
+fn utf8_len(byte: u8) -> u8 {
+
+    byte.leading_ones() as u8
 
 }
