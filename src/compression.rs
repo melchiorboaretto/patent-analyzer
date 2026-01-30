@@ -185,6 +185,12 @@ impl CompressedString {
 
 }
 
+impl std::fmt::Display for CompressedString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.decompress())
+    }
+}
+
 #[inline]
 fn utf8_len(byte: u8) -> u8 {
 
@@ -226,6 +232,8 @@ mod test {
         let compressed = CompressedString::compress(test_string, Arc::new(dict));
 
         assert_eq!(compressed.decompress(), test_string);
+
+        assert_eq!(format!("{}", compressed), format!("{}", test_string));
 
     }
 }
