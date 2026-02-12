@@ -1,6 +1,9 @@
 
 const DICTIONARY_SIZE: usize = 128;
-const UNICODE_ESCAPE_BYTE: u8 = 0x00;
+const UNICODE_ESCAPE_BYTE: u8 = 0x01;
+
+const HEADER_FILENAME: &str = "header.dict";
+const DICTIONARY_FILENAME: &str = "table.dict";
 
 use std::{
     collections::{
@@ -17,7 +20,7 @@ struct Dictionary {
 
 impl<'a> Dictionary {
 
-    fn from_strings<C: IntoIterator<Item = &'a str>>(data: C) -> Self {
+    pub fn from_strings<C: IntoIterator<Item = &'a str>>(data: C) -> Self {
 
         // Step 1 - Count all the words.
         let mut counting_map: HashMap<&str, u64> = HashMap::new();
@@ -109,7 +112,7 @@ struct CompressedString {
 
 impl CompressedString {
 
-    fn compress(string: &str, dict: Arc<Dictionary>) -> CompressedString {
+    pub fn compress(string: &str, dict: Arc<Dictionary>) -> CompressedString {
 
         let mut str_to_index = HashMap::with_capacity(DICTIONARY_SIZE);
         let mut text = Vec::with_capacity(string.len());
@@ -197,7 +200,7 @@ impl CompressedString {
         }
     }
 
-    fn decompress(&self) -> String {
+    pub fn decompress(&self) -> String {
 
         let str_len = self.text.len() * 2; // Chances are the string will be at least 2x larger than
         // the compressed version
@@ -207,6 +210,8 @@ impl CompressedString {
         while let Some(byte) = text_iter.next() {
 
             match *byte {
+
+                0x00 => {},
 
                 UNICODE_ESCAPE_BYTE => {
                     let mut buffer = [0u8; 4];
@@ -241,7 +246,7 @@ impl CompressedString {
 
                 }
 
-                1..=0x7F => {
+                0x02..=0x7F => {
 
                     return_string.push(*byte as char);
 
