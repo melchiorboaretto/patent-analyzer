@@ -42,8 +42,137 @@ impl<V: Copy> Node<V> {
 
     }
 
+    fn get_next(&mut self, next: u8) -> Option<&mut Self> {
+
+        let mut node = None;
+
+        for child in self.children.iter_mut() {
+            if child.0 == next {
+                node = Some(&mut child.1);
+                break;
+            }
+        }
+
+        if let Some(return_val) = node {
+            Some(&mut *return_val)
+        } else {
+            None
+        }
+    }
+
 }
 
+
+impl<V: Copy> Patricia<V> {
+
+    fn new() -> Self {
+        Patricia {
+            root: Node::new("", None, None),
+        }
+    }
+
+    fn insert(&mut self, radix: impl Into<Vec<u8>>, value: V) -> V {
+
+        let input_radix = radix.into();
+        let mut curr_input_idx = 0;
+
+        // This is the match_pos from the split function...
+        let mut found_unmatch = false;
+
+        // Here I have to initialize the variables because the compiler
+        // is unable to know that the only way to make found_unmatch == true is
+        // to attribute a value to all of the three inside the for-if block
+        let mut unmatch_pos = 0;
+        let mut unmatch_input_idx = 0;
+
+        let mut node = self.root();
+
+        loop {
+
+            let mut curr_node_idx = 0;
+            let mut is_prefix = false;
+
+            for (cmp_idx, cmp_byte) in node.radix.iter().enumerate() {
+
+                if curr_input_idx == input_radix.len() || input_radix[curr_input_idx] != *cmp_byte {
+                    if curr_input_idx == input_radix.len() {
+                        is_prefix = true;
+                    }
+                    unmatch_input_idx = curr_input_idx;
+                    unmatch_pos = cmp_idx;
+                    found_unmatch = true;
+                    break;
+                }
+                curr_input_idx += 1;
+                curr_node_idx += 1;
+
+            }
+
+            // If I tried to insert over an existing node
+            if !found_unmatch 
+            && node.radix.len() == curr_node_idx
+            && curr_input_idx == input_radix.len() {
+
+                // Value implements Copy so this is fine (I guess)
+                break if let Some(node_value) = node.value {
+
+                    node_value
+
+                } else {
+
+                    node.value = Some(value);
+                    value
+
+                };
+            }
+
+            // If there was not an unmatch and the input radix has ended
+            // like in (porco) and trying to insert "por"
+            if is_prefix {
+                node.split(unmatch_pos);
+                node.value = Some(value);
+
+                break value;
+            }
+
+            // Kinda obvious...
+            if found_unmatch {
+                node.split(unmatch_pos);
+                let new_boxed_node = Box::new(
+                    Node::new(&input_radix[unmatch_input_idx..], Some(value), None)
+                );
+
+                node.children.push((new_boxed_node.radix[0], new_boxed_node));
+
+                break value;
+            } else {
+
+                // If there exists a child starting with the next letter...
+                if let Some(child_idx) = node.children.iter().position(|pair| pair.0 == input_radix[curr_input_idx]) {
+                    node = &mut node.children[child_idx].1;
+
+                    // If there's not...
+                } else {
+                    let new_boxed_node = Box::new(
+                        Node::new(&input_radix[curr_input_idx..], Some(value), None)
+                    );
+
+                    node.children.push((new_boxed_node.radix[0], new_boxed_node));
+
+                    break value;
+                }
+
+            }
+
+        }
+    }
+
+    #[inline]
+    fn root(&mut self) -> &mut Node<V> {
+        &mut self.root
+    }
+
+}
 
 
 
@@ -87,4 +216,17 @@ mod test {
 
     }
 
+    #[test]
+    fn simple_insertion() {
+
+        let porca = String::from("porca");
+        let por = String::from("por");
+
+        let mut patricia = Patricia::new();
+        patricia.insert(por, 7);
+        patricia.insert(porca, 3);
+
+        println!("{:?}", patricia.root.children[0].1.radix);
+
+    }
 }
