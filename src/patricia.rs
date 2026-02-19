@@ -71,7 +71,7 @@ impl<V: Copy> Patricia<V> {
         }
     }
 
-    fn insert(&mut self, radix: impl Into<Vec<u8>>, value: V) -> V {
+    fn insert(&mut self, radix: impl Into<Vec<u8>>, value: V) -> Result<V, V> {
 
         let input_radix = radix.into();
         let mut curr_input_idx = 0;
@@ -116,12 +116,12 @@ impl<V: Copy> Patricia<V> {
                 // Value implements Copy so this is fine (I guess)
                 break if let Some(node_value) = node.value {
 
-                    node_value
+                    Err(node_value)
 
                 } else {
 
                     node.value = Some(value);
-                    value
+                    Ok(value)
 
                 };
             }
@@ -132,7 +132,7 @@ impl<V: Copy> Patricia<V> {
                 node.split(unmatch_pos);
                 node.value = Some(value);
 
-                break value;
+                break Ok(value);
             }
 
             // Kinda obvious...
@@ -144,7 +144,7 @@ impl<V: Copy> Patricia<V> {
 
                 node.children.push((new_boxed_node.radix[0], new_boxed_node));
 
-                break value;
+                break Ok(value);
             } else {
 
                 // If there exists a child starting with the next letter...
@@ -159,12 +159,63 @@ impl<V: Copy> Patricia<V> {
 
                     node.children.push((new_boxed_node.radix[0], new_boxed_node));
 
-                    break value;
+                    break Ok(value);
                 }
 
             }
 
         }
+    }
+
+    fn get(&self, radix: impl AsRef<[u8]>) -> Option<V> {
+
+        let radix = radix.as_ref();
+        let mut input_idx = 0;
+
+        let mut node = &self.root;
+
+        loop {
+
+            if radix[input_idx..].len() == node.radix.len() {
+
+                if radix[input_idx..] == node.radix {
+
+                    break node.value;
+
+                } else {
+                    break None;
+                }
+
+            } else if radix[input_idx..].len() > node.radix.len() {
+
+                for cmp_byte in &node.radix {
+                    if radix[input_idx] != *cmp_byte {
+                        // Return early of course hehe
+                        return None;
+                    }
+
+                    input_idx += 1;
+                }
+
+                if let Some(child_idx) = node.children
+                    .iter()
+                    .position(|pair| pair.0 == radix[input_idx]) {
+
+                    node = &node.children[child_idx].1;
+                } else {
+
+                    return None;
+
+                }
+
+            } else {
+
+                break None;
+
+            }
+
+        }
+
     }
 
     #[inline]
@@ -217,16 +268,32 @@ mod test {
     }
 
     #[test]
-    fn simple_insertion() {
+    fn insertion_and_get() {
 
         let porca = String::from("porca");
         let por = String::from("por");
+        let porcaria = String::from("porcaria");
+        let potro = String::from("potro");
+        let potrinho = String::from("potrinho");
+        let porquinho = String::from("porquinha");
 
         let mut patricia = Patricia::new();
-        patricia.insert(por, 7);
-        patricia.insert(porca, 3);
+        patricia.insert(por.clone(), 0).unwrap();
+        patricia.insert(porca.clone(), 1).unwrap();
+        patricia.insert(porquinho.clone(), 2).unwrap();
+        patricia.insert(potrinho.clone(), 3).unwrap();
+        patricia.insert(potro.clone(), 4).unwrap();
+        patricia.insert(porcaria.clone(), 5).unwrap();
 
-        println!("{:?}", patricia.root.children[0].1.radix);
+        assert_eq!(patricia.get(&por).unwrap(), 0);
+        assert_eq!(patricia.get(&porca).unwrap(), 1);
+        assert_eq!(patricia.get(&porquinho).unwrap(), 2);
+        assert_eq!(patricia.get(&potrinho).unwrap(), 3);
+        assert_eq!(patricia.get(&potro).unwrap(), 4);
+        assert_eq!(patricia.get(&porcaria).unwrap(), 5);
+
+
+        assert_eq!(patricia.insert(potrinho.clone(), 9), Err(3));
 
     }
 }
