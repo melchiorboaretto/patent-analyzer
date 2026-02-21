@@ -71,6 +71,9 @@ impl<V: Copy> Patricia<V> {
         }
     }
 
+    /// Try to insert a radix and a value corresponding to it.
+    /// Returns the value added wrapped in Ok() if it could be added or
+    /// the the old value wrapped in Err() if a value was already there
     fn insert(&mut self, radix: impl Into<Vec<u8>>, value: V) -> Result<V, V> {
 
         let input_radix = radix.into();
@@ -167,6 +170,7 @@ impl<V: Copy> Patricia<V> {
         }
     }
 
+    /// Retrieves a value corresponding to a given radix
     fn get(&self, radix: impl AsRef<[u8]>) -> Option<V> {
 
         let radix = radix.as_ref();
@@ -215,6 +219,62 @@ impl<V: Copy> Patricia<V> {
             }
 
         }
+
+    }
+
+    /// Updates the value corresponding to the given radix.
+    /// Returns None if the node did not exist or the old value wrapped in Some
+    fn update(&mut self, radix: impl AsRef<[u8]>, value: V) -> Option<V> {
+
+        let radix = radix.as_ref();
+        let mut input_idx = 0;
+
+        let mut node = self.root();
+
+        loop {
+
+            if radix[input_idx..].len() == node.radix.len() {
+
+                if radix[input_idx..] == node.radix && node.value.is_some() {
+
+                    let ret_value = node.value;
+                    node.value = Some(value);
+                    break ret_value;
+
+                } else {
+                    break None;
+                }
+
+            } else if radix[input_idx..].len() > node.radix.len() {
+
+                for cmp_byte in &node.radix {
+                    if radix[input_idx] != *cmp_byte {
+                        // Return early of course hehe
+                        return None;
+                    }
+
+                    input_idx += 1;
+                }
+
+                if let Some(child_idx) = node.children
+                    .iter()
+                    .position(|pair| pair.0 == radix[input_idx]) {
+
+                    node = &mut node.children[child_idx].1;
+                } else {
+
+                    return None;
+
+                }
+
+            } else {
+
+                break None;
+
+            }
+
+        }
+
 
     }
 
