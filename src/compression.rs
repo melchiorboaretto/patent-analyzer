@@ -5,19 +5,181 @@ const UNICODE_ESCAPE_BYTE: u8 = 0x01;
 const HEADER_FILENAME: &str = "header.dict";
 const DICTIONARY_FILENAME: &str = "table.dict";
 
+const OFFSET_SIZE_IN_BYTES: u64 = (size_of::<u64>() * 2) as u64;
+
 use std::{
+    cmp::Reverse,
+    io::{
+        Result,
+        Seek,
+        Write
+    },
+    path::Path,
+    sync::Arc,
     collections::{
         BinaryHeap, 
         HashMap
     },
-    cmp::Reverse,
-    sync::Arc,
 };
 
 struct Dictionary {
     entries: Vec<String>,
 }
 
+use positioned_io::{ReadAt, WriteAt};
+
+// Implements Disk I/O
+impl Dictionary {
+
+    /// Create a pair header/dictionaries of files.
+    /// Because the files do not contain any kind of code in the beggining
+    /// or something alike, at least not yet; this function simply creates two new files
+    pub fn create_files(folder_path: impl AsRef<Path>) -> Result<()> {
+
+        let folder_path = folder_path.as_ref();
+
+        std::fs::OpenOptions::new()
+            .truncate(false)
+            .create(true)
+            .write(true)
+            .open(folder_path.join(HEADER_FILENAME))?;
+
+        std::fs::OpenOptions::new()
+            .truncate(false)
+            .create(true)
+            .write(true)
+            .open(folder_path.join(DICTIONARY_FILENAME))?;
+
+        Ok(())
+    }
+
+    pub fn export_to_file(&self, dictionaries_path: impl AsRef<Path>) -> Result<(u64, u64)> {
+
+        let mut block_size = 0;
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(dictionaries_path)?;
+
+        // TA AQUI EU PRECISO DESCOBRIR O OFFSET CERTO DO ARQUIVO EM QUE VAI SER POSTO O PRIMEIRO
+        // NEGOCIO,
+        let offset = file.seek(std::io::SeekFrom::End(0))?;
+
+        for word in &self.entries {
+            file.write_all(word.as_bytes())?;
+            file.write_all(&[0u8])?;
+            block_size += word.len() + 1;
+        }
+
+        Ok((offset, block_size as u64))
+
+    }
+
+    pub fn set_offset_size(header_path: impl AsRef<Path>, offset_size: (u64, u64), id: u64) -> Result<()> {
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(header_path)?;
+
+        let offset = offset_size.0.to_le_bytes();
+        let size = offset_size.1.to_le_bytes();
+
+        let offset_size = [offset, size];
+
+        file.write_all_at(OFFSET_SIZE_IN_BYTES * id, &offset_size.concat())
+
+    }
+
+    /// If the size (return.1) is 0, implies that the dictionary does not exist. And MUST be
+    /// updated to be used
+    ///
+    /// Reminder: If the Return value is Err and the file does not exist, it must be created
+    /// OUT of this function. Moreover, the files exist in pairs (header/dictionaries)
+    fn get_offset_size(header_path: impl AsRef<Path>, id: u64) -> Result<Option<(u64, u64)>> {
+
+        let file_open = std::fs::File::open(header_path);
+
+        match file_open {
+
+            Err(error) => {
+
+                match error.kind() {
+                    std::io::ErrorKind::UnexpectedEof => Ok(None),
+
+                    _ => Err(error)
+                }
+            },
+
+            Ok(file) => {
+
+                let mut raw_bytes = [0; OFFSET_SIZE_IN_BYTES as usize];
+
+                file.read_exact_at(id * OFFSET_SIZE_IN_BYTES, &mut raw_bytes)?;
+                let (offset_bytes, size_bytes) = raw_bytes.split_at(size_of::<u64>());
+
+                let offset = u64::from_le_bytes(offset_bytes.try_into().unwrap());
+                let size = u64::from_le_bytes(size_bytes.try_into().unwrap());
+
+                Ok(if size == 0 {
+                    None
+
+                } else {
+                    Some((offset, size))
+                })
+
+            },
+        }
+    }
+
+    fn words_from_offset_size(dictionaries_path: impl AsRef<Path>, offset_size: (u64, u64)) -> Result<Vec<String>> {
+
+        let dictionaries = std::fs::File::open(dictionaries_path)?;
+
+        let mut raw_bytes = vec![0u8; offset_size.1 as usize];
+        dictionaries.read_exact_at(offset_size.0, &mut raw_bytes)?;
+
+        let mut return_vec: Vec<String> = raw_bytes
+            .split(|b| *b == 0)
+            .map(|slice| String::from_utf8(slice.to_vec()).unwrap())
+            .collect();
+
+        return_vec.pop();
+
+        Ok(return_vec)
+
+    }
+
+    fn from_file(header_path: impl AsRef<Path>, dictionaries_path: impl AsRef<Path>, id: u64) -> Result<Option<Dictionary>> {
+
+        if let Some(offset_size) = Dictionary::get_offset_size(header_path, id)? {
+
+            let words = Dictionary::words_from_offset_size(dictionaries_path, offset_size)?;
+
+            Ok(
+                Some(
+                    Dictionary {
+                        entries: words,
+                    }
+                )
+            )
+
+
+        } else {
+
+            Ok(None)
+        }
+    }
+
+    /// Uses the standard header and dictionaries file names.
+    pub fn from_file_std(folder_path: impl AsRef<Path>, id: u64) -> Result<Option<Dictionary>> {
+        let path = folder_path.as_ref();
+
+        Dictionary::from_file(path.join(HEADER_FILENAME), path.join(DICTIONARY_FILENAME), id)
+    }
+
+}
+
+// Implements In Memory functions
 impl<'a> Dictionary {
 
     pub fn from_strings<C: IntoIterator<Item = &'a str>>(data: C) -> Self {
@@ -35,8 +197,8 @@ impl<'a> Dictionary {
                 if let Some(last_char) = word.chars().last() 
                 && matches!(last_char, '\'' | '"' | '!' | '?' | ')' | '-' | ']' | '}' | ':' | ';' | ',' | '.') {
 
-                    // REMINDER: IT WORKS BECAUSE I'M USING ASCII CHARACTERS, IF UNICODE CHARS ARE
-                    // USED, IT IS NECESSARY TO REWRITE THIS LOGIC
+                    // REMINDER: IT WORKS BECAUSE I'M USING ASCII CHARACTERS INSIDE THE MATCH,
+                    // IF UNICODE CHARS ARE USED, IT IS NECESSARY TO REWRITE THIS LOGIC
                     word = &word[..word.len() - 1];
 
                 }
@@ -289,6 +451,9 @@ fn utf8_len(byte: u8) -> u8 {
 mod test {
 
     use super::*;
+    use tempfile::*;
+    use std::fs::*;
+    use std::io::Write;
 
     #[test]
     fn compress_and_decompress() {
@@ -317,6 +482,9 @@ mod test {
         };
 
         let overkill_dict = Dictionary::from_strings(vec![test_string]);
+        let other_overkill_dict = Dictionary {
+            entries: overkill_dict.entries.clone(),
+        };
 
         let overcompressed = CompressedString::compress(test_string, Arc::new(overkill_dict));
 
@@ -326,6 +494,29 @@ mod test {
         assert_eq!(compressed.decompress(), overcompressed.decompress());
 
         assert_eq!(format!("{}", compressed), format!("{}", test_string));
+
+        // I'm testing the file handling below
+        let tempdir = tempdir().expect("UNABLE TO CREATE A TEMPORARY DIRECTORY");
+        let file_path = tempdir
+            .path()
+            .to_owned();
+
+        let first_id = 42;
+        let second_id = 43;
+
+        Dictionary::create_files(&file_path).unwrap();
+        let offset_size = overcompressed.dict.export_to_file(file_path.join(DICTIONARY_FILENAME)).unwrap();
+        Dictionary::set_offset_size(file_path.join(HEADER_FILENAME), offset_size, first_id).unwrap();
+
+        let offset_size = compressed.dict.export_to_file(file_path.join(DICTIONARY_FILENAME)).unwrap();
+        Dictionary::set_offset_size(file_path.join(HEADER_FILENAME), offset_size, second_id).unwrap();
+
+        let neo_overkill_dict = Dictionary::from_file_std(&file_path, 42).unwrap().unwrap();
+        let neo_normal_dict = Dictionary::from_file_std(&file_path, 43).unwrap().unwrap();
+
+        for index in 0..other_overkill_dict.entries.len() {
+            assert_eq!(other_overkill_dict.entries[index], neo_overkill_dict.entries[index]);
+        }
 
     }
 }
