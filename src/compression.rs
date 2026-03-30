@@ -395,7 +395,7 @@ impl CompressedString {
                     return_string.push(unicode_char);
                 }
 
-                b'\'' | b'"' | b'!' | b'?' | b')' | b']' | b'}' | b';' => {
+                b'"' | b'!' | b'?' | b')' | b']' | b';' => {
 
                     let last_char = return_string.pop();
 
@@ -464,7 +464,35 @@ mod test {
             de medicamentos autorizada previamente. Ainda conforme a proposta, o teor de THC deverá ser no máximo de 0,3%. As áreas de cultivo \
             serão limitadas, devendo ser georreferenciadas, fotografadas e monitoradas. Segundo a Anvisa, tratam-se de áreas pequenas, que serão \
             acompanhadas de perto pela agência. Para o transporte dos produtos, a Anvisa informou que será \
-            firmada uma parceria com a Polícia Rodoviária Federal.";
+            firmada uma parceria com a Polícia Rodoviária Federal. \
+            \
+            Fila impactante com quase três quilômetros de vagões parados é retrato da decadência das ferrovias no RS; assista \
+            Governos e empresas buscam alternativas para conter a precarização da malha ferroviária do Estado, que perdeu 75% do \
+            tamanho em três décadas. \
+            \
+            Ficou mais fácil para os bandidos, diz Armínio Fraga sobre infiltração no sistema financeiro \
+            Ex-presidente do Banco Central diz que o mundo descoordenado ajudou atividades ilegais e vê como \
+            maior erro no caso Master o descuido com uso de fundos no balanço do banco. \
+            \
+            Sucesso nas redes sociais, chocolate Trento chega ao menu de sorvetes do McDonald's \
+            Sobremesa McFlurry Trento Bites entra oficialmente nas lojas de todo o Brasil em 2 de setembro \
+            \
+            In this example, the spawned thread is “detached,” which means that there is no way for the program \
+            to learn when the spawned thread completes or otherwise terminates. \
+            To learn when a thread completes, it is necessary to capture the JoinHandle object that is \
+            returned by the call to spawn, which provides a join method that allows the caller to wait for the \
+            completion of the spawned thread: \
+            use std::thread; \
+            let thread_join_handle = thread::spawn(move || { \
+            // some work here \
+            }); \
+            // some work here \
+            let res = thread_join_handle.join(); \
+            The join method returns a thread::Result containing Ok of the final value produced by the \
+            spawned thread, or Err of the value given to a call to panic! if the thread panicked. \
+            Note that there is no parent/child relationship between a thread that spawns a new thread and \
+            the thread being spawned. In particular, the spawned thread may or may not outlive the spawning \
+            thread, unless the spawning thread is the main thread.";
 
         let dict_not_optimal_words = ["de", "a", "o", "que", "e", "do", "da", "em", "um", "para", "é",
             "com", "não", "uma", "os", "no", "se", "na", "por", "mais", "as", "dos", "como", "mas", "foi",
