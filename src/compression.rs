@@ -2,28 +2,138 @@
 const DICTIONARY_SIZE: usize = 128;
 const UNICODE_ESCAPE_BYTE: u8 = 0x01;
 
+const FOLDERNAME: &str = "dictionaries";
 const HEADER_FILENAME: &str = "header.dict";
 const DICTIONARY_FILENAME: &str = "table.dict";
 
 const OFFSET_SIZE_IN_BYTES: u64 = (size_of::<u64>() * 2) as u64;
 
 use std::{
+
     cmp::Reverse,
+
+    collections::{
+        BinaryHeap,
+        HashMap,
+    },
+
     io::{
         Result,
         Seek,
-        Write
+        Write,
     },
-    path::Path,
-    sync::Arc,
-    collections::{
-        BinaryHeap, 
-        HashMap
+
+    path::{
+        Path,
+        PathBuf,
     },
+
+    sync::{
+        Arc,
+        OnceLock,
+    }
 };
+
+pub struct DictionaryManager {
+    path: String,
+    dict_cache: HashMap<u64, Arc<Dictionary>>,
+}
+
+impl<'a> DictionaryManager {
+
+    #[cfg(test)]
+    fn __test_set_path(&mut self, new_path: String) {
+
+        self.path = new_path;
+
+    }
+
+    pub fn new() -> Self {
+
+        DictionaryManager {
+            path: String::from(FOLDERNAME),
+            dict_cache: HashMap::new(),
+        }
+
+    }
+
+    pub fn populate<C: IntoIterator<Item = &'a str>>(&mut self, id: u64, data: C) -> Result<bool>{
+
+        let folder_path = PathBuf::from(&self.path);
+
+        let test_offset_size = Dictionary::get_offset_size(
+            folder_path.join(HEADER_FILENAME),
+            id
+        );
+
+        let test_offset_size = match test_offset_size {
+
+            Err(error) => {
+
+                if error.kind() == std::io::ErrorKind::NotFound {
+
+                    Dictionary::create_files(self.path.clone())?;
+
+                } else {
+                    return Err(error)
+                }
+
+                None
+
+            }
+
+            Ok(offset_size) => offset_size,
+
+        };
+
+        // Guard to test if the dictionary was already populated
+        if test_offset_size.is_some() {
+            return Ok(false);
+        }
+
+        // If it was not, populate it and save the metadata
+        let new_dict = Dictionary::from_strings(data);
+
+        let offset_size = new_dict.export_to_file(folder_path.join(DICTIONARY_FILENAME))?;
+        Dictionary::set_offset_size(folder_path.join(HEADER_FILENAME), offset_size, id)?;
+
+        Ok(true)
+
+    }
+
+    pub fn get(&mut self, id: u64) -> Result<Option<Arc<Dictionary>>> {
+
+        // Tests for cache
+        if let Some(cached_dict) = self.dict_cache.get(&id) {
+
+            return Ok(Some(cached_dict.clone()));
+
+        }
+
+        // Cache miss
+        let folder_path = PathBuf::from(&self.path);
+
+        let dict = Dictionary::from_file(folder_path.join(HEADER_FILENAME),
+            folder_path.join(DICTIONARY_FILENAME),
+            id
+        )?;
+
+        if let Some(dict) = dict {
+            let arc_dict = Arc::new(dict);
+            self.dict_cache.insert(id, arc_dict.clone());
+            Ok(Some(arc_dict.clone()))
+        } else {
+            Ok(None)
+        }
+
+    }
+
+
+}
 
 struct Dictionary {
     entries: Vec<String>,
+    lookup_map: OnceLock<HashMap<String, u8>>,
 }
 
 use positioned_io::{ReadAt, WriteAt};
@@ -34,7 +144,7 @@ impl Dictionary {
     /// Create a pair header/dictionaries of files.
     /// Because the files do not contain any kind of code in the beggining
     /// or something alike, at least not yet; this function simply creates two new files
-    pub fn create_files(folder_path: impl AsRef<Path>) -> Result<()> {
+    fn create_files(folder_path: impl AsRef<Path>) -> Result<()> {
 
         let folder_path = folder_path.as_ref();
 
@@ -53,7 +163,7 @@ impl Dictionary {
         Ok(())
     }
 
-    pub fn export_to_file(&self, dictionaries_path: impl AsRef<Path>) -> Result<(u64, u64)> {
+    fn export_to_file(&self, dictionaries_path: impl AsRef<Path>) -> Result<(u64, u64)> {
 
         let mut block_size = 0;
 
@@ -75,7 +185,7 @@ impl Dictionary {
 
     }
 
-    pub fn set_offset_size(header_path: impl AsRef<Path>, offset_size: (u64, u64), id: u64) -> Result<()> {
+    fn set_offset_size(header_path: impl AsRef<Path>, offset_size: (u64, u64), id: u64) -> Result<()> {
 
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -103,29 +213,44 @@ impl Dictionary {
 
             Err(error) => {
 
-                match error.kind() {
-                    std::io::ErrorKind::UnexpectedEof => Ok(None),
+                Err(error)
 
-                    _ => Err(error)
-                }
             },
 
             Ok(file) => {
 
                 let mut raw_bytes = [0; OFFSET_SIZE_IN_BYTES as usize];
 
-                file.read_exact_at(id * OFFSET_SIZE_IN_BYTES, &mut raw_bytes)?;
-                let (offset_bytes, size_bytes) = raw_bytes.split_at(size_of::<u64>());
+                match file.read_exact_at(id * OFFSET_SIZE_IN_BYTES, &mut raw_bytes) {
 
-                let offset = u64::from_le_bytes(offset_bytes.try_into().unwrap());
-                let size = u64::from_le_bytes(size_bytes.try_into().unwrap());
+                    Ok(_) => {
+                        let (offset_bytes, size_bytes) = raw_bytes.split_at(size_of::<u64>());
 
-                Ok(if size == 0 {
-                    None
+                        let offset = u64::from_le_bytes(offset_bytes.try_into().unwrap());
+                        let size = u64::from_le_bytes(size_bytes.try_into().unwrap());
 
-                } else {
-                    Some((offset, size))
-                })
+                        Ok(if size == 0 {
+                            None
+
+                        } else {
+                            Some((offset, size))
+                        })
+                    },
+
+                    Err(error) => {
+
+                        if error.kind() == std::io::ErrorKind::UnexpectedEof {
+
+                            Ok(None)
+
+                        } else {
+
+                            Err(error)
+
+                        }
+
+                    }
+                }
 
             },
         }
@@ -159,6 +284,7 @@ impl Dictionary {
                 Some(
                     Dictionary {
                         entries: words,
+                        lookup_map: OnceLock::new(),
                     }
                 )
             )
@@ -171,7 +297,7 @@ impl Dictionary {
     }
 
     /// Uses the standard header and dictionaries file names.
-    pub fn from_file_std(folder_path: impl AsRef<Path>, id: u64) -> Result<Option<Dictionary>> {
+    fn from_file_std(folder_path: impl AsRef<Path>, id: u64) -> Result<Option<Dictionary>> {
         let path = folder_path.as_ref();
 
         Dictionary::from_file(path.join(HEADER_FILENAME), path.join(DICTIONARY_FILENAME), id)
@@ -182,7 +308,7 @@ impl Dictionary {
 // Implements In Memory functions
 impl<'a> Dictionary {
 
-    pub fn from_strings<C: IntoIterator<Item = &'a str>>(data: C) -> Self {
+    fn from_strings<C: IntoIterator<Item = &'a str>>(data: C) -> Self {
 
         // Step 1 - Count all the words.
         let mut counting_map: HashMap<&str, u64> = HashMap::new();
@@ -252,6 +378,7 @@ impl<'a> Dictionary {
 
         Dictionary {
             entries: dict_vec,
+            lookup_map: OnceLock::new(),
         }
 
     }
@@ -276,12 +403,20 @@ impl CompressedString {
 
     pub fn compress(string: &str, dict: Arc<Dictionary>) -> CompressedString {
 
-        let mut str_to_index = HashMap::with_capacity(DICTIONARY_SIZE);
         let mut text = Vec::with_capacity(string.len());
 
-        for entry in dict.entries.iter().enumerate() {
-            str_to_index.insert(entry.1.clone(), entry.0 + 128);
-        }
+        let init_function = || {
+
+            let mut lookup_map = HashMap::new();
+
+            for entry in dict.entries.iter().enumerate() {
+                lookup_map.insert(entry.1.clone(), entry.0 as u8 + 128);
+            }
+
+            lookup_map
+        };
+
+        let lookup_map = dict.lookup_map.get_or_init(init_function);
 
         for word in string.split_whitespace() {
 
@@ -301,9 +436,9 @@ impl CompressedString {
                     word.collect::<String>()
                 };
 
-                if let Some(shorten_word) = str_to_index.get(&clean_word) { // === If it is
+                if let Some(shorten_word) = lookup_map.get(&clean_word) { // === If it is
                     // in the dictionary
-                    text.push(*shorten_word as u8);
+                    text.push(*shorten_word);
 
                 } else {
                     for character in clean_word.chars() {
@@ -327,9 +462,9 @@ impl CompressedString {
                     text.push(b' ');
                 }
 
-            } else if let Some(shorten_word) = str_to_index.get(word) { // If it is in the
+            } else if let Some(shorten_word) = lookup_map.get(word) { // If it is in the
                     // dictionary
-                text.push(*shorten_word as u8);
+                text.push(*shorten_word);
                 text.push(b' ');
 
             } else {
@@ -452,8 +587,6 @@ mod test {
 
     use super::*;
     use tempfile::*;
-    use std::fs::*;
-    use std::io::Write;
 
     #[test]
     fn compress_and_decompress() {
@@ -507,11 +640,13 @@ mod test {
 
         let dict = Dictionary {
             entries: dict_not_optimal_words.iter().map(|str| str.to_string()).collect(),
+            lookup_map: OnceLock::new(),
         };
 
         let overkill_dict = Dictionary::from_strings(vec![test_string]);
         let other_overkill_dict = Dictionary {
             entries: overkill_dict.entries.clone(),
+            lookup_map: OnceLock::new(),
         };
 
         let overcompressed = CompressedString::compress(test_string, Arc::new(overkill_dict));
@@ -540,11 +675,80 @@ mod test {
         Dictionary::set_offset_size(file_path.join(HEADER_FILENAME), offset_size, second_id).unwrap();
 
         let neo_overkill_dict = Dictionary::from_file_std(&file_path, 42).unwrap().unwrap();
-        let neo_normal_dict = Dictionary::from_file_std(&file_path, 43).unwrap().unwrap();
 
         for index in 0..other_overkill_dict.entries.len() {
             assert_eq!(other_overkill_dict.entries[index], neo_overkill_dict.entries[index]);
         }
 
+
+    }
+
+    #[test]
+    fn client_interface() {
+
+    let test_string = "Gaúcha Zero Hora 28/01/2026 - 16:50h Anvisa aprova cultivo de cannabis para fins medicinais.\
+        De acordo com o texto, a produção de cannabis só será autorizada para fins medicinais e farmacêuticos, \
+        sendo restrita a pessoas jurídicas. Os estabelecimentos só poderão produzir a quantidade necessária para atender a uma demanda \
+        de medicamentos autorizada previamente. Ainda conforme a proposta, o teor de THC deverá ser no máximo de 0,3%. As áreas de cultivo \
+        serão limitadas, devendo ser georreferenciadas, fotografadas e monitoradas. Segundo a Anvisa, tratam-se de áreas pequenas, que serão \
+        acompanhadas de perto pela agência. Para o transporte dos produtos, a Anvisa informou que será \
+        firmada uma parceria com a Polícia Rodoviária Federal. \
+        \
+        Fila impactante com quase três quilômetros de vagões parados é retrato da decadência das ferrovias no RS; assista \
+        Governos e empresas buscam alternativas para conter a precarização da malha ferroviária do Estado, que perdeu 75% do \
+        tamanho em três décadas. \
+        \
+        Ficou mais fácil para os bandidos, diz Armínio Fraga sobre infiltração no sistema financeiro \
+        Ex-presidente do Banco Central diz que o mundo descoordenado ajudou atividades ilegais e vê como \
+        maior erro no caso Master o descuido com uso de fundos no balanço do banco. \
+        \
+        Sucesso nas redes sociais, chocolate Trento chega ao menu de sorvetes do McDonald's \
+        Sobremesa McFlurry Trento Bites entra oficialmente nas lojas de todo o Brasil em 2 de setembro \
+        \
+        In this example, the spawned thread is “detached,” which means that there is no way for the program \
+        to learn when the spawned thread completes or otherwise terminates. \
+        To learn when a thread completes, it is necessary to capture the JoinHandle object that is \
+        returned by the call to spawn, which provides a join method that allows the caller to wait for the \
+        completion of the spawned thread: \
+        use std::thread; \
+        let thread_join_handle = thread::spawn(move || { \
+        // some work here \
+        }); \
+        // some work here \
+        let res = thread_join_handle.join(); \
+        The join method returns a thread::Result containing Ok of the final value produced by the \
+        spawned thread, or Err of the value given to a call to panic! if the thread panicked. \
+        Note that there is no parent/child relationship between a thread that spawns a new thread and \
+        the thread being spawned. In particular, the spawned thread may or may not outlive the spawning \
+        thread, unless the spawning thread is the main thread.";
+
+
+        let tempdir = tempdir().expect("UNABLE TO CREATE A TEMPORARY DIRECTORY");
+        let file_path = tempdir
+            .path()
+            .to_string_lossy();
+
+        let path_string = String::from(file_path);
+
+        // Here starts the test 
+        let mut dict_mgr = DictionaryManager::new();
+
+        dict_mgr.__test_set_path(path_string);
+
+        dict_mgr.populate(42, vec![test_string]).expect("IT WAS NOT POSSIBLE TO POPULATE THE DICTIONARY!");
+
+        let my_dict = dict_mgr.get(42).unwrap().unwrap();
+
+        let compressed = CompressedString::compress(test_string, my_dict.clone());
+
+        assert_eq!(format!("{}", compressed), format!("{}", test_string));
+
+        // Cache test
+        dict_mgr.populate(93, vec!["This is a test driven text, compression does not matter"]).unwrap();
+
+        let first_ptr = dict_mgr.get(93).unwrap().unwrap();
+        let second_ptr = dict_mgr.get(93).unwrap().unwrap();
+
+        assert!(Arc::ptr_eq(&first_ptr, &second_ptr));
     }
 }
